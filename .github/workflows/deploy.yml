@@ -1,0 +1,70 @@
+name: Deploy site
+
+# Refresh and deploy happen in one job on purpose. A commit made with
+# GITHUB_TOKEN does not trigger other workflows, so a separate "refresh" job
+# that pushed data.json would never kick off a deploy.
+on:
+  push:
+    branches: [main]
+  schedule:
+    # 18:30 UTC on weekdays — after the Istanbul and London sessions have closed,
+    # so the daily bar is settled. GitHub may delay scheduled runs at peak times.
+    - cron: "30 18 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write      # committing the refreshed data.json
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # On a push the committed data is deployed as-is; scheduled and manual
+      # runs pull fresh rates first.
+      - name: Refresh USD/TRY data
+        if: github.event_name != 'push'
+        env:
+          EVDS_API_KEY: ${{ secrets.EVDS_API_KEY }}
+        run: python3 fetch_data.py
+
+      - name: Commit refreshed data
+        if: github.event_name != 'push'
+        run: |
+          if [[ -n "$(git status --porcelain site/data.json)" ]]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add site/data.json
+            git commit -m "chore: refresh USD/TRY data"
+            git push
+          else
+            echo "No change in site/data.json — nothing to commit."
+          fi
+
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

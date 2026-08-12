@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "usdtry-site",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["serve.py", "8899"],
+      "port": 8899
+    }
+  ]
+}

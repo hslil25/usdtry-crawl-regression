@@ -1,0 +1,291 @@
+/* USD/TRY crawl regression — chart-surface tokens follow the validated
+   reference palette; dark mode is a selected set of steps, not an inversion. */
+
+:root {
+  color-scheme: light;
+  --surface-1:      #fcfcfb;
+  --plane:          #f9f9f7;
+  --text-primary:   #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted:     #898781;
+  --grid:           #e1e0d9;
+  --axis:           #c3c2b7;
+  --border:         rgba(11, 11, 11, 0.10);
+
+  --series-1:       #2a78d6;  /* rate */
+  --series-2:       #eb6834;  /* fitted path */
+  --series-3:       #1baf7a;  /* secondary window */
+
+  --pos:            #2a78d6;  /* diverging: lira-positive */
+  --neg:            #d03b3b;  /* diverging: lira-negative */
+  --mid:            #f0efec;
+
+  --good:           #0ca30c;
+  --warning:        #fab219;
+  --critical:       #d03b3b;
+  --up-text:        #006300;
+
+  --band-1:         rgba(42, 120, 214, 0.16);
+  --band-2:         rgba(42, 120, 214, 0.07);
+
+  /* Week regimes: one ordered pace axis, so a diverging scale — a blue arm and
+     a red arm around a neutral midpoint. Each arm validated as a one-hue ramp. */
+  --regime-0:       #1c5cab;  /* reversal  — slowest */
+  --regime-1:       #86b6ef;  /* pause               */
+  --regime-2:       #898781;  /* on path   — neutral */
+  --regime-3:       #df7f7e;  /* catch-up            */
+  --regime-4:       #d03b3b;  /* sprint    — fastest */
+
+  --radius: 10px;
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1:      #1a1a19;
+  --plane:          #0d0d0d;
+  --text-primary:   #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted:     #898781;
+  --grid:           #2c2c2a;
+  --axis:           #383835;
+  --border:         rgba(255, 255, 255, 0.10);
+
+  --series-1:       #3987e5;
+  --series-2:       #d95926;
+  --series-3:       #199e70;
+
+  --pos:            #3987e5;
+  --neg:            #d03b3b;
+  --mid:            #383835;
+
+  --up-text:        #0ca30c;
+
+  --band-1:         rgba(57, 135, 229, 0.22);
+  --band-2:         rgba(57, 135, 229, 0.10);
+
+  /* Same two arms re-stepped for the dark surface: the step nearest the surface
+     is the darkest one, so the arms invert relative to light mode. */
+  --regime-0:       #6da7ec;
+  --regime-1:       #256abf;
+  --regime-2:       #898781;
+  --regime-3:       #9f4c4c;
+  --regime-4:       #e66767;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  background: var(--plane);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── top bar ─────────────────────────────────────────────────── */
+
+.topbar {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 24px; padding: 22px 28px 18px;
+  border-bottom: 1px solid var(--border); background: var(--surface-1);
+}
+.brand h1 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+.brand .sub {
+  margin: 6px 0 0; max-width: 68ch;
+  color: var(--text-secondary); font-size: 13px;
+}
+.topbar-right { display: flex; align-items: center; gap: 14px; }
+.spot { text-align: right; }
+.spot-value { display: block; font-size: 30px; font-weight: 600; letter-spacing: -0.02em; }
+.spot-meta { font-size: 12px; color: var(--text-secondary); }
+
+.btn-icon {
+  border: 1px solid var(--border); background: var(--plane);
+  color: var(--text-secondary); border-radius: 8px;
+  width: 34px; height: 34px; font-size: 15px; cursor: pointer;
+}
+.btn-icon:hover { color: var(--text-primary); }
+
+/* ── filter row ──────────────────────────────────────────────── */
+
+.filterbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 14px;
+  padding: 10px 28px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+}
+.filter-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+.presets { display: flex; gap: 4px; flex-wrap: wrap; }
+.presets button {
+  border: 1px solid transparent; background: transparent;
+  color: var(--text-secondary);
+  padding: 5px 11px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 13px; min-height: 28px;
+}
+.presets button:hover { background: var(--plane); color: var(--text-primary); }
+.presets button[aria-pressed="true"] {
+  background: var(--series-1); color: #fff; border-color: var(--series-1);
+}
+.custom-range { display: flex; gap: 10px; align-items: center; }
+.custom-range label { font-size: 12px; color: var(--text-secondary); }
+.custom-range input {
+  font: inherit; font-size: 12px; padding: 4px 6px; margin-left: 4px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--plane); color: var(--text-primary);
+}
+.filter-note { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+
+/* ── layout ──────────────────────────────────────────────────── */
+
+main { padding: 20px 28px 40px; max-width: 1560px; margin: 0 auto; }
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px 20px;
+  margin-bottom: 18px;
+}
+.card-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 16px; margin-bottom: 14px;
+}
+.card h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.card-sub {
+  margin: 4px 0 0; max-width: 78ch;
+  font-size: 12.5px; color: var(--text-secondary);
+}
+.card-tools { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+.btn-toggle {
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text-secondary); border-radius: 7px;
+  padding: 5px 11px; font: inherit; font-size: 12px; cursor: pointer;
+  min-height: 28px;
+}
+.btn-toggle:hover { color: var(--text-primary); }
+.btn-toggle[aria-pressed="true"] { background: var(--plane); color: var(--text-primary); }
+.chk { font-size: 12px; color: var(--text-secondary); cursor: pointer; }
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.grid-2 > .card { margin-bottom: 18px; }
+@media (max-width: 1080px) { .grid-2 { grid-template-columns: 1fr; } }
+
+/* Chart boxes are sized to include the x-axis band, never a nested scroll. */
+.chart { width: 100%; height: 340px; }
+.chart.tall { height: 560px; }
+.chart.short { height: 190px; }
+
+.legend-note {
+  margin: 10px 0 0; font-size: 12px; color: var(--text-secondary);
+}
+
+/* ── stat tiles ──────────────────────────────────────────────── */
+
+.tiles {
+  display: grid; gap: 12px; margin-bottom: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+}
+.tile {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px 15px;
+}
+.tile-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-muted); display: block; margin-bottom: 7px;
+}
+.tile-value { font-size: 25px; font-weight: 600; letter-spacing: -0.02em; }
+.tile-unit { font-size: 14px; font-weight: 500; color: var(--text-secondary); margin-left: 2px; }
+.tile-note { display: block; margin-top: 5px; font-size: 11.5px; color: var(--text-secondary); }
+.tile-value.pos { color: var(--up-text); }
+.tile-value.neg { color: var(--critical); }
+
+/* ── tables ──────────────────────────────────────────────────── */
+
+.table-view { overflow-x: auto; }
+.table-view.scroll { max-height: 460px; overflow-y: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+thead th {
+  position: sticky; top: 0; background: var(--surface-1);
+  text-align: right; font-weight: 600; color: var(--text-secondary);
+  padding: 7px 10px; border-bottom: 1px solid var(--axis);
+  white-space: nowrap;
+}
+thead th:first-child, tbody td:first-child { text-align: left; }
+tbody td {
+  padding: 6px 10px; text-align: right;
+  border-bottom: 1px solid var(--grid);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+tbody tr:hover { background: var(--plane); }
+td.pos { color: var(--up-text); }
+td.neg { color: var(--critical); }
+td.dim { color: var(--text-muted); }
+/* Rate direction, not sentiment: a rising USD/TRY is the lira weakening. */
+td.weaker { color: var(--critical); }
+td.stronger { color: var(--up-text); }
+.tag {
+  display: inline-block; padding: 1px 7px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; border: 1px solid var(--border);
+}
+.tag.up { color: var(--critical); }
+.tag.down { color: var(--up-text); }
+.tag.flat { color: var(--text-muted); }
+
+/* ── regime legend ───────────────────────────────────────────── */
+
+.regime-legend {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px;
+}
+.regime-chip {
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 11px 5px 9px;
+  border: 1px solid var(--border); border-radius: 999px;
+  font-size: 12px; color: var(--text-secondary);
+}
+.regime-chip .sw {
+  width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0;
+}
+.regime-chip b { color: var(--text-primary); font-weight: 600; }
+.regime-chip .cnt {
+  font-variant-numeric: tabular-nums; color: var(--text-muted);
+}
+.regime-cell { display: inline-flex; align-items: center; gap: 6px; }
+.regime-cell .sw { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+.stress-dot { color: var(--warning); font-weight: 700; }
+
+.stat-rows { display: grid; gap: 9px; margin-bottom: 12px; }
+.stat-row {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--grid);
+  font-size: 13px;
+}
+.stat-row span:first-child { color: var(--text-secondary); }
+.stat-row span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* ── footer ──────────────────────────────────────────────────── */
+
+.foot {
+  padding: 18px 28px 44px; border-top: 1px solid var(--border);
+  color: var(--text-secondary); font-size: 12.5px;
+}
+.foot summary { cursor: pointer; margin: 10px 0 6px; color: var(--text-primary); }
+.foot ul { margin: 6px 0 0; padding-left: 18px; max-width: 92ch; }
+.foot li { margin-bottom: 5px; }
+.foot code {
+  background: var(--plane); padding: 1px 5px; border-radius: 4px; font-size: 12px;
+}
+
+.loading { padding: 60px 28px; color: var(--text-muted); }
+.error {
+  margin: 20px 28px; padding: 14px 16px; border-radius: var(--radius);
+  border: 1px solid var(--critical); color: var(--critical);
+  background: var(--surface-1);
+}

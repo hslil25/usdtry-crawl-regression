@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>USD/TRY — Crawl Path Regression</title>
+<!-- href set below with a per-load token: a cached stylesheet silently drops the
+     chart colour tokens, which fails as grey marks rather than as an error. -->
+<link rel="stylesheet" id="mainCss">
+<script>document.getElementById("mainCss").href = `css/style.css?t=${Date.now()}`;</script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <h1>USD/TRY — Crawl Path Regression</h1>
+    <p class="sub">The CBRT lets the lira float inside a managed path. A straight
+      line through <em>log</em> price is a constant % crawl, so the fitted slope is
+      the pace and the residuals are the float around it.</p>
+  </div>
+  <div class="topbar-right">
+    <div class="spot">
+      <span class="spot-value" id="spotValue">—</span>
+      <span class="spot-meta"><span id="spotChange">—</span> · <span id="spotDate">—</span></span>
+    </div>
+    <button id="themeToggle" class="btn-icon" type="button" aria-label="Toggle dark mode">◐</button>
+  </div>
+</header>
+
+<!-- One filter row, scoping every chart below it. -->
+<div class="filterbar" role="group" aria-label="Date range">
+  <span class="filter-label">Window</span>
+  <div class="presets" id="presets"></div>
+  <div class="custom-range">
+    <label>From <input type="date" id="fromDate"></label>
+    <label>To <input type="date" id="toDate"></label>
+  </div>
+  <span class="filter-note" id="rangeNote"></span>
+</div>
+
+<main>
+
+  <!-- ── headline ─────────────────────────────────────────────── -->
+  <section class="tiles" id="tiles" aria-label="Headline metrics"></section>
+
+  <!-- ── the path ─────────────────────────────────────────────── -->
+  <section class="card wide">
+    <div class="card-head">
+      <div>
+        <h2>The path</h2>
+        <p class="card-sub">Log-scale rate against the fitted crawl line, with
+          ±1σ and ±2σ residual bands — the corridor the rate floats in.</p>
+      </div>
+      <div class="card-tools"><button class="btn-toggle" data-view="pathChart">Table</button></div>
+    </div>
+    <div class="chart" id="pathChart"></div>
+    <div class="table-view" id="pathChart-table" hidden></div>
+    <p class="legend-note" id="pathNote"></p>
+  </section>
+
+  <!-- ── deviation ────────────────────────────────────────────── -->
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Deviation from the path</h2>
+        <p class="card-sub">Residuals in %. Above zero the lira is weaker than
+          the path implies, below zero stronger.</p>
+      </div>
+      <div class="card-tools"><button class="btn-toggle" data-view="devChart">Table</button></div>
+    </div>
+    <div class="chart" id="devChart"></div>
+    <div class="table-view" id="devChart-table" hidden></div>
+  </section>
+
+  <!-- ── pace over time ───────────────────────────────────────── -->
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Is the pace changing?</h2>
+        <p class="card-sub">Annualised crawl from a trailing 20- and 60-session
+          regression. Flat lines mean a steady managed pace.</p>
+      </div>
+      <div class="card-tools"><button class="btn-toggle" data-view="paceChart">Table</button></div>
+    </div>
+    <div class="chart" id="paceChart"></div>
+    <div class="table-view" id="paceChart-table" hidden></div>
+  </section>
+
+  <!-- ── regimes ──────────────────────────────────────────────── -->
+  <section class="card wide">
+    <div class="card-head">
+      <div>
+        <h2>Detected regimes</h2>
+        <p class="card-sub">Breakpoints found by binary segmentation on log
+          price, kept only when they improve BIC. Each row is a stretch with its
+          own crawl pace.</p>
+      </div>
+    </div>
+    <div class="table-view" id="regimeTable"></div>
+  </section>
+
+  <!-- ── week regimes ─────────────────────────────────────────── -->
+  <section class="card wide">
+    <div class="card-head">
+      <div>
+        <h2>Weeks by regime</h2>
+        <p class="card-sub">Every week labelled by how its own pace compared
+          with the window's baseline crawl. Thresholds come from the spread of
+          weekly pace in the window itself, so the classes adapt rather than
+          asserting a fixed idea of "normal".</p>
+      </div>
+      <div class="card-tools"><button class="btn-toggle" data-view="regimeChart">Table</button></div>
+    </div>
+    <div class="regime-legend" id="regimeLegend"></div>
+    <div class="chart" id="regimeChart"></div>
+    <div class="table-view scroll" id="regimeChart-table" hidden></div>
+    <p class="legend-note" id="regimeNote"></p>
+  </section>
+
+  <!-- ── weekday profile per regime ───────────────────────────── -->
+  <section class="card wide">
+    <div class="card-head">
+      <div>
+        <h2>Weekday profile by regime</h2>
+        <p class="card-sub">Mean daily move, in basis points, split by the kind
+          of week it fell in. If the same day leads inside every class, the
+          weekday pattern is structural rather than a side effect of the fast
+          weeks being fast.</p>
+      </div>
+      <div class="card-tools"><button class="btn-toggle" data-view="dowRegimeChart">Table</button></div>
+    </div>
+    <div class="chart" id="dowRegimeChart"></div>
+    <div class="table-view" id="dowRegimeChart-table" hidden></div>
+    <p class="legend-note" id="dowRegimeNote"></p>
+  </section>
+
+  <!-- ── weekday profile per segment ──────────────────────────── -->
+  <section class="card wide">
+    <div class="card-head">
+      <div>
+        <h2>Weekday profile by detected segment</h2>
+        <p class="card-sub">The same breakdown cut by the structural segments
+          from the breakpoint search — across eras rather than across week
+          types. If the weekday shape survives a change in the crawl's pace, it
+          is a feature of how the path is delivered, not of one stretch.</p>
+      </div>
+      <div class="card-tools"><button class="btn-toggle" data-view="dowSegChart">Table</button></div>
+    </div>
+    <div class="chart" id="dowSegChart"></div>
+    <div class="table-view" id="dowSegChart-table" hidden></div>
+    <p class="legend-note" id="dowSegNote"></p>
+  </section>
+
+  <!-- ── weekday effect ───────────────────────────────────────── -->
+  <div class="grid-2">
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>Day-of-week effect</h2>
+          <p class="card-sub">Mean daily move by weekday, in basis points.
+            Marked bars differ from the all-day average at p&nbsp;&lt;&nbsp;0.05.</p>
+        </div>
+        <div class="card-tools"><button class="btn-toggle" data-view="dowChart">Table</button></div>
+      </div>
+      <div class="chart" id="dowChart"></div>
+      <div class="table-view" id="dowChart-table" hidden></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>Drift through the week</h2>
+          <p class="card-sub">Average cumulative move from the Friday close,
+            with ±1 standard error.</p>
+        </div>
+        <div class="card-tools"><button class="btn-toggle" data-view="iwChart">Table</button></div>
+      </div>
+      <div class="chart" id="iwChart"></div>
+      <div class="table-view" id="iwChart-table" hidden></div>
+    </section>
+  </div>
+
+  <!-- ── weekly heatmap ───────────────────────────────────────── -->
+  <section class="card wide">
+    <div class="card-head">
+      <div>
+        <h2>Week × weekday moves</h2>
+        <p class="card-sub">Daily change in bps, most recent weeks at the top.
+          Blue is lira-positive, red lira-negative.</p>
+      </div>
+      <div class="card-tools"><button class="btn-toggle" data-view="heatChart">Table</button></div>
+    </div>
+    <div class="chart tall" id="heatChart"></div>
+    <div class="table-view" id="heatChart-table" hidden></div>
+  </section>
+
+  <!-- ── weekly table ─────────────────────────────────────────── -->
+  <section class="card wide">
+    <div class="card-head">
+      <div>
+        <h2>Week by week</h2>
+        <p class="card-sub">Each week's realised pace and how it shifted from
+          the week before.</p>
+      </div>
+      <div class="card-tools">
+        <label class="chk"><input type="checkbox" id="weeklyAll"> show all weeks</label>
+      </div>
+    </div>
+    <div class="table-view scroll" id="weeklyTable"></div>
+  </section>
+
+  <!-- ── volatility & returns ─────────────────────────────────── -->
+  <div class="grid-2">
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>Realised volatility</h2>
+          <p class="card-sub">Annualised, 20-session rolling window.</p>
+        </div>
+        <div class="card-tools"><button class="btn-toggle" data-view="volChart">Table</button></div>
+      </div>
+      <div class="chart" id="volChart"></div>
+      <div class="table-view" id="volChart-table" hidden></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>Daily move distribution</h2>
+          <p class="card-sub">Basis points per session over the window.</p>
+        </div>
+        <div class="card-tools"><button class="btn-toggle" data-view="histChart">Table</button></div>
+      </div>
+      <div class="chart" id="histChart"></div>
+      <div class="table-view" id="histChart-table" hidden></div>
+    </section>
+  </div>
+
+  <!-- ── mean reversion ───────────────────────────────────────── -->
+  <div class="grid-2">
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>Pull back to the path</h2>
+          <p class="card-sub">AR(1) on the residuals: how fast a deviation
+            decays.</p>
+        </div>
+      </div>
+      <div class="stat-rows" id="revStats"></div>
+      <div class="chart short" id="acfChart"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>If the path holds</h2>
+          <p class="card-sub">Mechanical extrapolation of the fitted line and
+            its ±2σ band. Not a forecast — it is what the current crawl implies
+            if nothing changes.</p>
+        </div>
+      </div>
+      <div class="table-view" id="projTable"></div>
+    </section>
+  </div>
+
+  <!-- ── monthly ──────────────────────────────────────────────── -->
+  <section class="card wide">
+    <div class="card-head">
+      <div>
+        <h2>Change by calendar month</h2>
+        <p class="card-sub">Each month's own move, over the whole history rather
+          than the selected window. The annualised equivalent is in the tooltip
+          and the table — a single month annualised is very noisy.</p>
+      </div>
+      <div class="card-tools"><button class="btn-toggle" data-view="monthChart">Table</button></div>
+    </div>
+    <div class="chart" id="monthChart"></div>
+    <div class="table-view" id="monthChart-table" hidden></div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <div id="provenance"></div>
+  <details>
+    <summary>Method &amp; caveats</summary>
+    <ul>
+      <li><strong>Why logs.</strong> A managed crawl is a constant percentage
+        pace. In logs that is a straight line, so OLS on log(rate) recovers the
+        pace directly and the residuals are (very nearly) percent deviations.</li>
+      <li><strong>Annualisation</strong> uses 252 trading sessions:
+        <code>(exp(slope × 252) − 1) × 100</code>.</li>
+      <li><strong>Bands</strong> are ±1σ/±2σ of the in-sample residuals, not an
+        announced corridor. The CBRT publishes no explicit band; this is the
+        corridor implied by how the rate has actually behaved.</li>
+      <li><strong>Breakpoints</strong> come from binary segmentation with a BIC
+        stopping rule. They are descriptive — they do not identify policy
+        decisions, and a break can reflect market stress rather than a change in
+        the managed pace.</li>
+      <li><strong>Weekday-by-regime is not an independent test.</strong> A week's
+        class is set by its total move, and the weekday means are components of
+        that same total, so the two are linked by construction. What the panel
+        can still say is <em>where</em> the difference between classes sits: if
+        Friday were driving the labels, Friday would grow with the class, and it
+        largely does not.</li>
+      <li><strong>Significance tests</strong> use a normal approximation and take
+        each session as independent. With residual autocorrelation present, small
+        weekday p-values should be read as suggestive rather than conclusive.</li>
+      <li><strong>R² is not evidence of management</strong> on its own — any
+        smooth trending series scores high. The unusually small residual σ next
+        to the trend is the informative part.</li>
+      <li><strong>Data</strong> is the daily market close, not the CBRT official
+        fixing. Set <code>EVDS_API_KEY</code> before running the fetcher to add
+        the official rate.</li>
+    </ul>
+  </details>
+</footer>
+
+<script src="vendor/echarts.min.js"></script>
+<!-- Loaded with a per-load token. Browsers cache ES modules hard, and a stale
+     module shows old numbers with no error to give it away — on a local
+     analysis tool that trade is not worth making. -->
+<script type="module">
+  import(`./js/app.js?t=${Date.now()}`);
+</script>
+</body>
+</html>
