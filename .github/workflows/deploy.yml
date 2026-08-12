@@ -58,9 +58,9 @@ jobs:
             echo "No change in site/data.json — nothing to commit."
           fi
 
+      # Pages is enabled once out-of-band (build_type=workflow). GITHUB_TOKEN
+      # cannot create the Pages site itself, so no `enablement` input here.
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
