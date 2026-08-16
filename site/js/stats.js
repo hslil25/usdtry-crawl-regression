@@ -608,22 +608,115 @@ export function describe(ret) {
   };
 }
 
-/** Extend the fitted path forward. This is a mechanical extrapolation of the
- *  current regime, not a forecast — it says where the rate lands if the crawl
- *  and the band hold exactly as they have. */
-export function project(fit, lastDate, horizons = [21, 63, 126, 252]) {
+/* ---------- forward path estimator ---------- */
+
+/** Standard normal CDF. */
+export const normalCdf = (z) => 0.5 * (1 + erf(z / Math.SQRT2));
+
+/** Signed count of weekday sessions between two dates. Public holidays are not
+ *  modelled, so a horizon spanning one is a session or two long; at these
+ *  horizons that shifts the estimate by a fraction of a basis point. */
+export function businessDaysBetween(fromISO, toISO) {
+  const a = new Date(`${fromISO}T00:00:00Z`);
+  const b = new Date(`${toISO}T00:00:00Z`);
+  const dir = b >= a ? 1 : -1;
+  const d = new Date(a);
+  let n = 0;
+  while (dir > 0 ? d < b : d > b) {
+    d.setUTCDate(d.getUTCDate() + dir);
+    const w = d.getUTCDay();
+    if (w !== 0 && w !== 6) n += dir;
+  }
+  return n;
+}
+
+/** Distribution of the rate h sessions ahead, conditional on the crawl holding.
+ *
+ *  The model is the one the rest of the page already fits:
+ *      log P_t = a + b·t + ε_t ,   ε_t = φ·ε_{t-1} + u_t
+ *
+ *  so h sessions out, in logs,
+ *      mean = a + b·(T+h) + φ^h·ε_T          today's gap decays back to the path
+ *      var  = σ²(1 − φ^{2h})                 deviation, widening to the corridor
+ *           + σ²·k·(1/n + (x−x̄)²/Sxx)       uncertainty in the fitted line
+ *
+ *  The k = (1+φ)/(1−φ) factor is the usual AR(1) correction to the effective
+ *  sample size. Without it the slope looks far better pinned down than 260
+ *  strongly autocorrelated residuals can justify, and the long-horizon cone
+ *  comes out implausibly tight.
+ *
+ *  This is a conditional distribution, not a forecast: it prices the noise
+ *  around the path, never the chance that the path itself is repriced.
+ */
+export function forecastAt(fit, phi, h) {
+  const n = fit.n;
+  const x = (n - 1) + h;
+  const xbar = (n - 1) / 2;
+  const sxx = (n * (n * n - 1)) / 12;      // Σ(x−x̄)² for x = 0..n−1
+  const sigma = fit.residSd / 100;         // residual σ in log units
+  const eps = fit.lastResid / 100;         // today's gap from the path
+
+  // A φ at or above 1 is a non-stationary estimate; clamp so the correction
+  // stays finite rather than dividing by ~0.
+  const p = Math.min(Math.max(phi ?? 0, 0), 0.98);
+
+  const muLog = fit.intercept + fit.slope * x + Math.pow(p, h) * eps;
+  const varDev = sigma * sigma * (1 - Math.pow(p, 2 * h));
+  const varLine = sigma * sigma * ((1 + p) / (1 - p))
+    * (1 / n + Math.pow(x - xbar, 2) / sxx);
+  const sd = Math.sqrt(varDev + varLine);
+
+  return {
+    h, muLog, sd,
+    median: Math.exp(muLog),
+    /** Rate at probability q (0–1). */
+    quantile: (q) => Math.exp(muLog + invNorm(q) * sd),
+    /** P(rate ends at or above `level`). */
+    probAbove: (level) => 1 - normalCdf((Math.log(level) - muLog) / sd),
+  };
+}
+
+/** Inverse standard normal (Acklam's rational approximation, |error| < 1e-9) —
+ *  needed to turn a probability back into a rate. */
+export function invNorm(p) {
+  if (p <= 0) return -Infinity;
+  if (p >= 1) return Infinity;
+  const a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
+    1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00];
+  const b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
+    6.680131188771972e+01, -1.328068155288572e+01];
+  const c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00,
+    -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00];
+  const d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00,
+    3.754408661907416e+00];
+  const pl = 0.02425;
+  let q, r;
+  if (p < pl) {
+    q = Math.sqrt(-2 * Math.log(p));
+    return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5])
+      / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+  }
+  if (p > 1 - pl) {
+    q = Math.sqrt(-2 * Math.log(1 - p));
+    return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5])
+      / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+  }
+  q = p - 0.5; r = q * q;
+  return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q
+    / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
+}
+
+/** The forecast evaluated at every session from 1..hMax ahead. */
+export function forecastSeries(fit, phi, lastDate, hMax) {
   const out = [];
-  const base = fit.n - 1;
-  for (const h of horizons) {
-    const idx = base + h;
-    const mid = Math.exp(fit.intercept + fit.slope * idx);
-    const band = fit.residSd / 100;
+  let date = lastDate;
+  for (let h = 1; h <= hMax; h++) {
+    date = addBusinessDays(date, 1);
+    const f = forecastAt(fit, phi, h);
     out.push({
-      days: h,
-      date: addBusinessDays(lastDate, h),
-      mid,
-      lo: mid * Math.exp(-2 * band),
-      hi: mid * Math.exp(2 * band),
+      h, date, median: f.median,
+      q025: f.quantile(0.025), q10: f.quantile(0.10), q25: f.quantile(0.25),
+      q75: f.quantile(0.75), q90: f.quantile(0.90), q975: f.quantile(0.975),
     });
   }
   return out;

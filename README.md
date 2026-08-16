@@ -63,7 +63,8 @@ against whatever date range is selected in the filter row.
 | Realised volatility | How noisy is the float, in annualised terms? |
 | Daily move distribution | Shape of daily moves — skew, tails, share of down days. |
 | Pull back to the path | AR(1) on residuals: half-life of a deviation. |
-| If the path holds | Mechanical extrapolation of the current fit. Not a forecast. |
+| Rate on a given date | Pick a date: what is the rate, and the odds of clearing a level? |
+| Projected path | The forward cone — median with 80% and 95% bands. |
 | Change by calendar month | The long view, across the full history. |
 
 ## Week regimes
@@ -178,5 +179,11 @@ node --input-type=module -e "import('./site/js/stats.js').then(async S=>{const d
   than conclusive.
 - The bands are fitted, not announced. The CBRT publishes no explicit corridor;
   ±1σ/±2σ describe how the rate has actually behaved in the window.
-- The projection panel extends the current fit mechanically. It assumes the crawl
-  and the band hold exactly, which is the one thing a regime change breaks.
+- The estimator gives a conditional distribution, not a forecast. It models the
+  deviation from the path as AR(1) and adds the uncertainty in the fitted slope,
+  cutting the effective sample size by `(1+φ)/(1−φ)` for autocorrelation —
+  without that correction, 260 highly autocorrelated residuals make the slope
+  look far better pinned down than it is. What it cannot price is the chance the
+  path itself is repriced, and over any horizon worth asking about that is the
+  risk that dominates. Read the ±1.5% one-year band as "assuming nothing
+  changes"; as an unconditional forecast for USD/TRY it would be indefensible.

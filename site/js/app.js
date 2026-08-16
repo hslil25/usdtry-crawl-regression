@@ -29,11 +29,15 @@ const bps = (v, d = 1) => (v == null || Number.isNaN(v) ? "—" : `${v >= 0 ? "+
 const cls = (v) => (v > 0 ? "weaker" : v < 0 ? "stronger" : "dim");
 const shortDate = (iso) => iso.slice(2).replace(/-/g, "‑");
 
+/** Probabilities in percent. A tail that rounds to 0.0% is small, not
+ *  impossible, and printing "0.0%" claims a certainty the model does not have. */
+const probPct = (p) => (p < 0.1 ? "<0.1%" : p > 99.9 ? ">99.9%" : `${p.toFixed(1)}%`);
+
 /* ── state ───────────────────────────────────────────────────── */
 
 const charts = new Map();
 let DATA = null;
-const state = { preset: "1y", from: null, to: null };
+const state = { preset: "1y", from: null, to: null, targetDate: null };
 
 // History begins July 2023, so "All" is already "since the policy turn" — a
 // separate preset for that would select the same range.
@@ -77,6 +81,11 @@ async function init() {
   document.getElementById("fromDate").addEventListener("change", onCustom);
   document.getElementById("toDate").addEventListener("change", onCustom);
   document.getElementById("weeklyAll").addEventListener("change", render);
+  document.getElementById("targetDate").addEventListener("change", (e) => {
+    state.targetDate = e.target.value;
+    render();
+  });
+  document.getElementById("targetLevel").addEventListener("input", render);
   window.addEventListener("resize", () => charts.forEach((c) => c.resize()));
 
   applyPreset("1y");
@@ -279,8 +288,10 @@ function render() {
   safe("weekly", () => renderWeekly(dates, close));
   safe("vol", () => renderVol(t, dates, ret));
   safe("hist", () => renderHist(t, ret, stats));
-  safe("reversion", () => renderReversion(t, fit, ret));
-  safe("projection", () => renderProjection(fit, dates));
+  const mr = S.meanReversion(fit.resid);
+  safe("reversion", () => renderReversion(t, ret, mr));
+  safe("estimator", () => renderEstimator(fit, mr?.phi, dates));
+  safe("cone", () => renderCone(t, dates, close, fit, mr?.phi));
   safe("monthly", () => renderMonthly(t));
   safe("provenance", () => renderProvenance());
 }
@@ -1137,8 +1148,7 @@ function renderHist(t, ret, stats) {
 
 /* ── 11. mean reversion ──────────────────────────────────────── */
 
-function renderReversion(t, fit, ret) {
-  const mr = S.meanReversion(fit.resid);
+function renderReversion(t, ret, mr) {
   const rows = mr ? [
     ["AR(1) coefficient φ", fmt(mr.phi, 3)],
     ["Half-life of a deviation", mr.halfLife ? `${fmt(mr.halfLife, 1)} sessions` : "—"],
@@ -1184,17 +1194,188 @@ function renderReversion(t, fit, ret) {
   });
 }
 
-/* ── 12. projection ──────────────────────────────────────────── */
+/* ── 12. path estimator ──────────────────────────────────────── */
 
-function renderProjection(fit, dates) {
-  const rows = S.project(fit, dates.at(-1));
-  setTable("projTable", table(
-    ["Horizon", "Date", "Path implies", "−2σ", "+2σ"],
-    rows.map((r) => [
-      r.days === 21 ? "1 month" : r.days === 63 ? "3 months"
-        : r.days === 126 ? "6 months" : "12 months",
-      r.date, `<strong>${r.mid.toFixed(3)}</strong>`,
-      r.lo.toFixed(3), r.hi.toFixed(3),
+const MAX_HORIZON = 504;   // ~2 years of sessions
+
+/** Distribution of the rate on the chosen date, plus the probability of
+ *  finishing at or above an optional level. */
+function renderEstimator(fit, phi, dates) {
+  const last = dates.at(-1);
+  const dateEl = document.getElementById("targetDate");
+  const levelEl = document.getElementById("targetLevel");
+
+  dateEl.min = S.addBusinessDays(last, 1);
+  dateEl.max = S.addBusinessDays(last, MAX_HORIZON);
+  if (!dateEl.value || dateEl.value <= last) {
+    dateEl.value = state.targetDate || S.addBusinessDays(last, 63);
+  }
+  state.targetDate = dateEl.value;
+
+  const readout = document.getElementById("estimatorReadout");
+  const h = S.businessDaysBetween(last, dateEl.value);
+
+  if (h <= 0) {
+    readout.innerHTML = `<p class="est-warn">Pick a date after ${last}.</p>`;
+    setTable("estimatorTable", "");
+    return;
+  }
+  if (h > MAX_HORIZON) {
+    readout.innerHTML = `<p class="est-warn">That is more than two years out —
+      beyond any horizon this fit can speak to.</p>`;
+    setTable("estimatorTable", "");
+    return;
+  }
+
+  const f = S.forecastAt(fit, phi, h);
+  const lo80 = f.quantile(0.10), hi80 = f.quantile(0.90);
+  const horizon = h === 1 ? "1 session out"
+    : h < 21 ? `${h} sessions out (~${(h / 5).toFixed(1)} weeks)`
+      : `${h} sessions out (~${(h / 21).toFixed(h < 63 ? 1 : 0)} months)`;
+  const spot = DATA.close.at(-1);
+  const change = (f.median / spot - 1) * 100;
+
+  const level = parseFloat(levelEl.value);
+  let probBlock = "";
+  if (Number.isFinite(level) && level > 0) {
+    const pAbove = f.probAbove(level) * 100;
+    probBlock = `<div class="est-prob">
+        <b>${probPct(pAbove)}</b>
+        <span>chance USD/TRY is at or above <strong>${level.toFixed(2)}</strong>
+        on ${dateEl.value} — and ${probPct(100 - pAbove)} below it.</span>
+      </div>`;
+  }
+
+  readout.innerHTML = `
+    <div class="est-hero">
+      <span class="est-value">${f.median.toFixed(3)}</span>
+      <span class="est-sub">central estimate for <strong>${dateEl.value}</strong> —
+        ${horizon}, ${signed(change, 1)}% from ${spot.toFixed(3)} today</span>
+    </div>
+    ${probBlock}
+    <div class="stat-rows">
+      <div class="stat-row"><span>80% range</span>
+        <span>${lo80.toFixed(3)} – ${hi80.toFixed(3)}</span></div>
+      <div class="stat-row"><span>95% range</span>
+        <span>${f.quantile(0.025).toFixed(3)} – ${f.quantile(0.975).toFixed(3)}</span></div>
+      <div class="stat-row"><span>Spread of the distribution (1σ)</span>
+        <span>±${fmt(f.sd * 100, 2)}%</span></div>
+    </div>`;
+
+  setTable("estimatorTable", table(
+    ["Probability the rate is at or below", "Level"],
+    [0.05, 0.25, 0.5, 0.75, 0.95].map((q) =>
+      [`${(q * 100).toFixed(0)}%`, `<strong>${f.quantile(q).toFixed(3)}</strong>`])));
+}
+
+/** The whole cone: recent actuals, the forward median, and the 80% / 95%
+ *  bands. History carries a zero-width band so the areas can stack without
+ *  nulls, which keeps the cone anchored exactly at the last close. */
+function renderCone(t, dates, close, fit, phi) {
+  const last = dates.at(-1);
+  const target = state.targetDate;
+  const hTarget = Math.min(Math.max(S.businessDaysBetween(last, target), 1), MAX_HORIZON);
+  const hMax = Math.max(Math.ceil(hTarget * 1.25), 63);
+  const fc = S.forecastSeries(fit, phi, last, hMax);
+
+  const tail = Math.min(dates.length, 120);
+  const xs = [...dates.slice(-tail), ...fc.map((p) => p.date)];
+  const nHist = tail;
+  const pad = (v) => new Array(nHist - 1).fill(v);
+  const lastClose = close.at(-1);
+
+  // History: base = the actual line, width = 0 (invisible). Forecast: the band.
+  const histBase = [...close.slice(-tail)];
+  const zeros = new Array(nHist).fill(0);
+  const band = (loKey, hiKey) => [
+    [...histBase, ...fc.map((p) => p[loKey])],
+    [...zeros, ...fc.map((p) => p[hiKey] - p[loKey])],
+  ];
+  const [b95, w95] = band("q025", "q975");
+  const [b80, w80] = band("q10", "q90");
+
+  const actual = [...close.slice(-tail), ...fc.map(() => null)];
+  const median = [...pad(null), lastClose, ...fc.map((p) => p.median)];
+
+  const mk = (name, base, width, color, z) => ([
+    { name: `_${name}_b`, type: "line", stack: name, z, data: base, showSymbol: false,
+      silent: true, lineStyle: { opacity: 0 }, areaStyle: { opacity: 0 },
+      emphasis: { disabled: true } },
+    { name, type: "line", stack: name, z, data: width, showSymbol: false,
+      silent: true, lineStyle: { opacity: 0 }, areaStyle: { color },
+      itemStyle: { color }, emphasis: { disabled: true } },
+  ]);
+
+  draw("coneChart", {
+    grid: { ...baseGrid, right: 60 },
+    backgroundColor: "transparent",
+    legend: {
+      data: ["USD/TRY", "Projected path", "80%", "95%"],
+      textStyle: { color: t.sec, fontSize: 12 },
+      icon: "roundRect", itemWidth: 14, itemHeight: 3, right: 10, top: 0,
+    },
+    tooltip: {
+      trigger: "axis", ...tooltipBox(t),
+      formatter: (ps) => {
+        const i = ps[0].dataIndex;
+        if (i < nHist) {
+          return `<strong>${xs[i]}</strong><br>Actual <b>${close[close.length - tail + i].toFixed(4)}</b>`;
+        }
+        const p = fc[i - nHist];
+        return `<strong>${p.date}</strong> · ${p.h} sessions out<br>
+          Central <b>${p.median.toFixed(3)}</b><br>
+          80% ${p.q10.toFixed(3)} – ${p.q90.toFixed(3)}<br>
+          95% ${p.q025.toFixed(3)} – ${p.q975.toFixed(3)}`;
+      },
+    },
+    xAxis: {
+      type: "category", data: xs, boundaryGap: false,
+      ...axisCommon(t), splitLine: { show: false },
+      axisLabel: { color: t.muted, fontSize: 11, hideOverlap: true },
+    },
+    yAxis: {
+      type: "value", scale: true, ...axisCommon(t),
+      axisLabel: { color: t.muted, fontSize: 11, formatter: (v) => v.toFixed(1) },
+    },
+    series: [
+      ...mk("95%", b95, w95, t.band2, 1),
+      ...mk("80%", b80, w80, t.band1, 2),
+      {
+        name: "Projected path", type: "line", data: median, z: 3,
+        showSymbol: false, lineStyle: { color: t.s2, width: 2 }, color: t.s2,
+        markLine: {
+          symbol: "none", silent: true,
+          lineStyle: { color: t.axis, width: 1, type: "dashed" },
+          // Bottom of the line: the top edge is where the legend sits.
+          label: {
+            color: t.muted, fontSize: 10, formatter: target,
+            position: "insideEndBottom",
+          },
+          data: [{ xAxis: nHist - 1 + hTarget }],
+        },
+      },
+      {
+        name: "USD/TRY", type: "line", data: actual, z: 4,
+        showSymbol: false, lineStyle: { color: t.s1, width: 2 }, color: t.s1,
+      },
+    ],
+  });
+
+  const at = fc[hTarget - 1];
+  document.getElementById("coneNote").innerHTML = at
+    ? `On <strong>${at.date}</strong> the fitted crawl puts USD/TRY at
+       <strong>${at.median.toFixed(3)}</strong>, with an 80% range of
+       ${at.q10.toFixed(3)} – ${at.q90.toFixed(3)}. The band is narrow because it
+       only prices the float inside the corridor and the uncertainty in the
+       slope — <strong>not the chance the crawl is repriced</strong>, which is
+       the risk that actually matters over horizons this long.`
+    : "";
+
+  setTable("coneChart-table", table(
+    ["Date", "Sessions out", "2.5%", "25%", "Central", "75%", "97.5%"],
+    fc.filter((p) => p.h % 5 === 0 || p.h === hTarget).map((p) => [
+      p.date, p.h, p.q025.toFixed(3), p.q25.toFixed(3),
+      `<strong>${p.median.toFixed(3)}</strong>`, p.q75.toFixed(3), p.q975.toFixed(3),
     ])));
 }
 

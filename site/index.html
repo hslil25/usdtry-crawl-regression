@@ -253,15 +253,38 @@
     <section class="card">
       <div class="card-head">
         <div>
-          <h2>If the path holds</h2>
-          <p class="card-sub">Mechanical extrapolation of the fitted line and
-            its ±2σ band. Not a forecast — it is what the current crawl implies
-            if nothing changes.</p>
+          <h2>Rate on a given date</h2>
+          <p class="card-sub">Pick a future date to get the distribution of the
+            rate, conditional on the crawl holding. Add a level to get the
+            probability of finishing at or above it.</p>
         </div>
       </div>
-      <div class="table-view" id="projTable"></div>
+      <div class="estimator-controls">
+        <label>Date <input type="date" id="targetDate"></label>
+        <label>Level <input type="number" id="targetLevel" step="0.25"
+                            inputmode="decimal" placeholder="optional"></label>
+      </div>
+      <div id="estimatorReadout"></div>
+      <div class="table-view" id="estimatorTable"></div>
     </section>
   </div>
+
+  <!-- ── projected path ───────────────────────────────────────── -->
+  <section class="card wide">
+    <div class="card-head">
+      <div>
+        <h2>Projected path</h2>
+        <p class="card-sub">The fitted crawl carried forward, with the 80% and
+          95% bands implied by the corridor's own noise and the uncertainty in
+          the fitted slope. Today's gap from the path decays back into the
+          corridor at the measured half-life.</p>
+      </div>
+      <div class="card-tools"><button class="btn-toggle" data-view="coneChart">Table</button></div>
+    </div>
+    <div class="chart" id="coneChart"></div>
+    <div class="table-view scroll" id="coneChart-table" hidden></div>
+    <p class="legend-note" id="coneNote"></p>
+  </section>
 
   <!-- ── monthly ──────────────────────────────────────────────── -->
   <section class="card wide">
@@ -302,6 +325,16 @@
         stopping rule. They are descriptive — they do not identify policy
         decisions, and a break can reflect market stress rather than a change in
         the managed pace.</li>
+      <li><strong>The estimator is a conditional distribution, not a
+        forecast.</strong> It answers "where does the rate sit if this crawl
+        keeps running", modelling the deviation as AR(1) around the fitted line
+        and adding the uncertainty in the slope itself (with the effective
+        sample size cut for autocorrelation). What it does not and cannot price
+        is the chance the path is repriced — which, over any horizon worth
+        asking about, is the risk that dominates. A ±1.5% one-year band for
+        USD/TRY is only sane read as "assuming nothing changes"; it would be
+        indefensible as an unconditional forecast. Holidays are not modelled,
+        so a horizon spanning one is a session or two long.</li>
       <li><strong>Weekday-by-regime is not an independent test.</strong> A week's
         class is set by its total move, and the weekday means are components of
         that same total, so the two are linked by construction. What the panel
