@@ -113,14 +113,21 @@ pace scale, so a fast stretch reads as the same red as a fast week.
 
 The two cuts disagree in a useful way. Over the last year the weekday shape is
 rigid: Friday leads in all seven detected segments, with its mean confined to
-+12 to +17 bp while segment pace ranges 14.8% to 20.7%. Extend the window back
-through the 2023 devaluation and it falls apart — Friday leads in about half the
-segments and its mean swings across tens of basis points. The regularity is a
-property of the managed-crawl era, not of the lira.
++12 to +20 bp even as segment pace ranges from roughly 15% to 21%. Widen to the
+full history and it loosens — Friday leads in 5 of 9 segments and its mean spans
+−20 to +19 bp, with the March 2025 stress episode inside the window. The
+regularity is a feature of the calm crawl, not a constant of the lira.
 
 ## Data
 
 `fetch_data.py` writes `site/data.json`.
+
+History starts **2023-07-03**, the first session of the first full month after
+the June 2023 policy turn. The step-devaluation itself is excluded deliberately:
+a single +24% month widens every fitted band and swamps the shared y-axis on the
+faceted panels. Everything on the site therefore describes the managed-crawl era
+and says nothing about what came before it. Change `START` in `fetch_data.py` to
+go back further.
 
 - **Primary:** Yahoo Finance `USDTRY=X` daily close.
   Yahoo stamps each daily FX bar at midnight in the exchange timezone, which

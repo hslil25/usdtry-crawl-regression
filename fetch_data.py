@@ -26,9 +26,11 @@ YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart/USDTRY=X"
 FRANKFURTER = "https://api.frankfurter.dev/v1"
 EVDS = "https://evds3.tcmb.gov.tr/service/evds"
 
-# History starts here. 2022 gives context for the pre-crawl era; the site
-# defaults to a much shorter window.
-START = dt.date(2022, 1, 3)
+# History starts here: July 2023, the first full month after the June 2023
+# policy turn. That deliberately excludes the step-devaluation itself — a single
+# +24% month that widens every fitted band and swamps the shared y-axis on the
+# faceted panels. What is left is the managed-crawl era.
+START = dt.date(2023, 7, 1)
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
 
 
@@ -58,6 +60,10 @@ def fetch_yahoo() -> dict[dt.date, float]:
             continue
         d = dt.datetime.fromtimestamp(ts + off, dt.UTC).date()
         if d.weekday() >= 5:  # FX weekend stubs are not real sessions
+            continue
+        # period1 is interpreted in local time, so the boundary bar can land a
+        # day early. Clip explicitly rather than trusting the request window.
+        if d < START:
             continue
         out[d] = round(float(close), 4)  # later bar for a date wins (live quote)
     return out

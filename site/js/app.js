@@ -35,12 +35,14 @@ const charts = new Map();
 let DATA = null;
 const state = { preset: "1y", from: null, to: null };
 
+// History begins July 2023, so "All" is already "since the policy turn" — a
+// separate preset for that would select the same range.
 const PRESETS = [
   { id: "3m", label: "3M", days: 92 },
   { id: "6m", label: "6M", days: 183 },
   { id: "ytd", label: "YTD" },
   { id: "1y", label: "1Y", days: 365 },
-  { id: "turn", label: "Since Jun 2023", from: "2023-06-08" },
+  { id: "2y", label: "2Y", days: 730 },
   { id: "all", label: "All" },
 ];
 
@@ -64,6 +66,13 @@ async function init() {
   buildPresets();
   wireToggles();
   wireTheme();
+
+  // Keep the custom pickers inside the range that actually has data.
+  for (const id of ["fromDate", "toDate"]) {
+    const el = document.getElementById(id);
+    el.min = DATA.dates[0];
+    el.max = DATA.dates.at(-1);
+  }
 
   document.getElementById("fromDate").addEventListener("change", onCustom);
   document.getElementById("toDate").addEventListener("change", onCustom);
